@@ -1,3 +1,5 @@
+"""GeminiClient pool management with round-robin selection and health tracking."""
+
 import asyncio
 import random
 from collections import deque
@@ -14,6 +16,7 @@ class GeminiClientPool(metaclass=Singleton):
     """Pool of GeminiClient instances identified by unique ids."""
 
     def __init__(self) -> None:
+        """Initialize client pool from global configuration."""
         self._clients: list[GeminiClientWrapper] = []
         self._id_map: dict[str, GeminiClientWrapper] = {}
         self._round_robin: deque[GeminiClientWrapper] = deque()

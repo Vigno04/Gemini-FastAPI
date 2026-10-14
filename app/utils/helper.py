@@ -1,3 +1,5 @@
+"""Helper utilities for formatting, normalization, and tool call handling."""
+
 import base64
 import hashlib
 import html
@@ -46,10 +48,14 @@ type JsonValue = bool | int | float | str | list[JsonValue] | dict[str, JsonValu
 VALID_TAG_ROLES = {"user", "assistant", "system", "tool"}
 TOOL_WRAP_HINT = (
     "\n\nSYSTEM: TOOL CALLING PROTOCOL (MANDATORY)\n"
-    "Either emit the tool-call block alone, or answer in natural language with no protocol tags. Never both.\n\n"
-    "1. Names MUST match the schemas exactly; every required parameter MUST be present with its declared JSON type.\n"
-    "2. Each value MUST stand alone between two fences of 3 backticks with no language tag; if it contains a backtick run, both fences MUST be longer.\n"
-    "3. Every opening tag MUST be closed in reverse order of opening. A fence closes only itself, never a tag. An unclosed tag voids the call.\n"
+    "Either emit the tool-call block alone, or answer in natural language with no protocol tags. "
+    "Never both.\n\n"
+    "1. Names MUST match the schemas exactly; every required parameter MUST be present with its "
+    "declared JSON type.\n"
+    "2. Each value MUST stand alone between two fences of 3 backticks with no language tag; "
+    "if it contains a backtick run, both fences MUST be longer.\n"
+    "3. Every opening tag MUST be closed in reverse order of opening. A fence closes only itself, "
+    "never a tag. An unclosed tag voids the call.\n"
     "4. Emit the block and nothing else. No preamble or commentary.\n\n"
     "REQUIRED SYNTAX, reproduce literally:\n"
     "[ToolCalls]\n"
@@ -65,8 +71,10 @@ TOOL_WRAP_HINT = (
 )
 STRUCTURED_JSON_WRAP_HINT = (
     "\n\nSYSTEM: STRUCTURED JSON PROTOCOL (MANDATORY)\n"
-    "1. Return exactly one fenced block holding one strict JSON document. No prose, no second block.\n"
-    "2. Open with ```json and close with a fence of the same length; if the JSON contains a backtick run, both fences MUST be longer.\n"
+    "1. Return exactly one fenced block holding one strict JSON document. "
+    "No prose, no second block.\n"
+    "2. Open with ```json and close with a fence of the same length; "
+    "if the JSON contains a backtick run, both fences MUST be longer.\n"
     "3. NEVER truncate the document or omit the closing fence.\n\n"
     "REQUIRED SYNTAX:\n"
     "```json\n"
@@ -84,8 +92,9 @@ STRICT_SCHEMA_ADHERENCE_PROMPT = (
     "Strict schema adherence is required: the JSON must conform exactly to the schema."
 )
 TOOL_INTERFACE_PROMPT = (
-    "SYSTEM INTERFACE: Call an available tool whenever the request requires one, with arguments that "
-    "validate against its JSON Schema. Never invent an undeclared tool or parameter."
+    "SYSTEM INTERFACE: Call an available tool whenever the request requires one, "
+    "with arguments that validate against its JSON Schema. "
+    "Never invent an undeclared tool or parameter."
 )
 TOOL_DESCRIPTION_PROMPT = "Tool `{name}`: {description}"
 TOOL_ARGUMENTS_SCHEMA_PROMPT = "Parameters JSON Schema:"
@@ -105,7 +114,8 @@ IMAGE_GENERATION_PROMPT = "\n\n".join(
     (
         "IMAGE PROTOCOL: Every image request MUST be answered with a generated image attachment.",
         "A new request MUST produce a new image; an edit MUST return the edited image.",
-        "NEVER substitute text for the image: no explanation, apology, progress note, or placeholder.",
+        "NEVER substitute text for the image: "
+        "no explanation, apology, progress note, or placeholder.",
     )
 )
 IMAGE_GENERATION_FORCED_PROMPT = (
@@ -233,8 +243,8 @@ def add_tag(role: str, content: str, unclose: bool = False) -> str:
 
 
 def normalize_llm_text(s: str) -> str:
-    """
-    Safely normalize LLM-generated text for both display and hashing.
+    """Safely normalize LLM-generated text for both display and hashing.
+
     Includes: HTML unescaping, NFC normalization, and line ending standardization.
     """
     if not s:
@@ -251,8 +261,7 @@ def unescape_text(s: str) -> str:
 
 
 def strip_markdown_fence(s: str) -> str:
-    """
-    Remove one outer Markdown code fence layer for protected LLM payloads.
+    """Remove one outer Markdown code fence layer for protected LLM payloads.
 
     The fence length is detected from the opening fence so tool parameters and
     structured JSON can safely contain shorter backtick sequences inside.
@@ -278,8 +287,7 @@ def strip_markdown_fence(s: str) -> str:
 
 
 def _parse_tool_argument_value(raw_value: str) -> JsonValue:
-    """
-    Convert a tagged tool argument into the most specific JSON-compatible value.
+    """Convert a tagged tool argument into the most specific JSON-compatible value.
 
     JSON literals, arrays, and objects are preserved so downstream clients receive
     strict argument types, while plain text values remain strings for compatibility.
@@ -596,8 +604,8 @@ async def save_url_to_tempfile(url: str, tempdir: Path | None = None) -> Path:
 
 
 def strip_tagged_blocks(text: str) -> str:
-    """
-    Remove ChatML role blocks (<|im_start|>role...<|im_end|>).
+    """Remove ChatML role blocks (<|im_start|>role...<|im_end|>).
+
     Role 'tool' blocks are removed entirely; others have markers stripped but content preserved.
     """
     if not text:
@@ -653,8 +661,8 @@ def strip_system_hints(text: str) -> str:
 
 
 def _process_tools_internal(text: str, extract: bool = True) -> tuple[str, list[AppToolCall]]:
-    """
-    Extract tool metadata and return text stripped of technical markers.
+    """Extract tool metadata and return text stripped of technical markers.
+
     Tagged arguments preserve JSON-compatible types and receive deterministic call IDs.
     """
     if not text:
@@ -946,7 +954,8 @@ def canonicalize_structured_output(
         structured_payload = orjson.loads(candidate)
     except orjson.JSONDecodeError:
         logger.warning(
-            f"Failed to decode JSON for structured response (schema={structured_requirement.schema_name})."
+            "Failed to decode JSON for structured response "
+            f"(schema={structured_requirement.schema_name})."
         )
         return None
 
@@ -991,9 +1000,10 @@ def process_llm_output(
     raw_text: str,
     structured_requirement: StructuredOutputRequirement | None,
 ) -> tuple[str | None, str, str, list[AppToolCall]]:
-    """
-    Post-process Gemini output to extract tool calls, unwrap structured JSON fences, and prepare clean text for display and storage.
-    Returns: (thoughts, visible_text, storage_output, tool_calls)
+    """Post-process Gemini output to extract tool calls and prepare clean text.
+
+    Unwraps structured JSON fences and prepares clean text for display and storage.
+    Returns: (thoughts, visible_text, storage_output, tool_calls).
     """
     if thoughts:
         thoughts = thoughts.strip()

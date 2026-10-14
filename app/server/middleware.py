@@ -1,3 +1,5 @@
+"""Middleware and security dependencies for request processing."""
+
 import hashlib
 import hmac
 import tempfile
@@ -28,10 +30,12 @@ class RequestBodyLimitMiddleware:
     """
 
     def __init__(self, app: ASGIApp, max_body_bytes: int) -> None:
+        """Initialize middleware with ASGI app and maximum allowed body size in bytes."""
         self.app = app
         self.max_body_bytes = max(0, max_body_bytes)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Process ASGI HTTP request and enforce body size limit."""
         if scope["type"] != "http" or self.max_body_bytes == 0:
             await self.app(scope, receive, send)
             return
@@ -158,6 +162,7 @@ def cleanup_expired_media(retention_days: int) -> int:
 
 
 def global_exception_handler(request: Request, exc: Exception):
+    """Handle uncaught exceptions and convert them into standardized JSON responses."""
     if isinstance(exc, HTTPException):
         return JSONResponse(
             status_code=exc.status_code,
@@ -171,6 +176,7 @@ def global_exception_handler(request: Request, exc: Exception):
 
 
 def get_temp_dir():
+    """Yield a temporary directory path and clean it up afterwards."""
     temp_dir = tempfile.TemporaryDirectory()
     try:
         yield Path(temp_dir.name)
@@ -209,6 +215,7 @@ def verify_gemini_api_key(request: Request):
 def verify_api_key(
     credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer(auto_error=False)),
 ):
+    """Verify Bearer token against configured API key."""
     if not g_config.server.api_key:
         return ""
 
@@ -223,10 +230,12 @@ def verify_api_key(
 
 
 def add_exception_handler(app: FastAPI):
+    """Register global exception handler on the FastAPI app."""
     app.add_exception_handler(Exception, global_exception_handler)
 
 
 def add_request_size_limit_middleware(app: FastAPI) -> None:
+    """Register request body limit middleware on the FastAPI app."""
     app.add_middleware(
         RequestBodyLimitMiddleware,
         max_body_bytes=g_config.server.max_request_body_bytes,
@@ -234,6 +243,7 @@ def add_request_size_limit_middleware(app: FastAPI) -> None:
 
 
 def add_cors_middleware(app: FastAPI):
+    """Register CORS middleware on the FastAPI app if enabled."""
     if g_config.cors.enabled:
         cors = g_config.cors
         app.add_middleware(

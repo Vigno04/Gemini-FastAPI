@@ -59,6 +59,7 @@ def _stream(*outputs: ModelOutput):
 
 @pytest.fixture
 def db(tmp_path):
+    """Provide an isolated LMDB conversation store instance for testing."""
     opened = LMDBConversationStore.open_isolated(db_path=str(tmp_path / "lmdb"))
     try:
         yield opened
@@ -109,6 +110,7 @@ def _payloads(frames: list[str]) -> list[dict]:
 
 
 def test_a_plain_stream_opens_with_a_role_delta_and_ends_with_done(db):
+    """Verify streaming response begins with role delta and terminates with [DONE]."""
     frames = _collect(db, _stream(_output("Hello"), _output("Hello world", delta=" world")))
 
     assert frames[-1] == "data: [DONE]\n\n"
@@ -124,6 +126,7 @@ def test_a_plain_stream_opens_with_a_role_delta_and_ends_with_done(db):
 
 
 def test_reasoning_is_streamed_on_its_own_delta_field(db):
+    """Verify reasoning content is emitted in reasoning_content delta field."""
     frames = _collect(db, _stream(_output("answer", thoughts_delta="thinking")))
     reasoning = [
         payload["choices"][0]["delta"]["reasoning_content"]
@@ -134,6 +137,7 @@ def test_reasoning_is_streamed_on_its_own_delta_field(db):
 
 
 def test_a_tool_call_is_reported_and_finishes_as_tool_calls(db):
+    """Verify detected tool calls are emitted and finish reason is tool_calls."""
     frames = _collect(db, _stream(_output(TOOL_CALL_OUTPUT)))
     payloads = _payloads(frames)
 
@@ -166,6 +170,7 @@ def test_structured_output_is_withheld_until_it_has_been_validated(db):
 
 
 def test_a_strict_schema_violation_ends_the_stream_with_an_error_and_a_terminator(db):
+    """Verify schema violation terminates stream with schema_validation_failed error."""
     frames = _collect(
         db,
         _stream(_output('{"wrong": true}')),
@@ -179,6 +184,7 @@ def test_a_strict_schema_violation_ends_the_stream_with_an_error_and_a_terminato
 
 
 def test_an_unmet_forced_tool_choice_ends_the_stream_with_an_error(db):
+    """Verify unmet required tool choice terminates stream with error event."""
     frames = _collect(db, _stream(_output("just prose")), tool_choice="required")
 
     assert frames[-1].endswith("data: [DONE]\n\n")
@@ -220,6 +226,8 @@ def test_a_volunteered_image_does_not_satisfy_a_forced_tool_choice(db, monkeypat
 
 
 def test_an_upstream_failure_mid_stream_is_reported_and_terminated(db):
+    """Verify mid-stream upstream exceptions are reported as server errors."""
+
     async def failing():
         yield _output("partial")
         raise RuntimeError("upstream went away")
@@ -271,6 +279,7 @@ def test_a_structured_turn_is_reusable_by_replaying_what_the_client_received(db)
 
 
 def test_a_failed_turn_is_not_persisted(db):
+    """Verify failed streaming turns are not stored in conversation storage."""
     _collect(
         db,
         _stream(_output('{"wrong": true}')),
@@ -280,6 +289,7 @@ def test_a_failed_turn_is_not_persisted(db):
 
 
 def test_responses_schema_failure_cancels_pending_media_tasks(db, monkeypatch):
+    """Verify schema validation failure cancels in-flight background media tasks."""
     started: list[asyncio.Task] = []
 
     async def slow_download(_img):
@@ -327,6 +337,7 @@ def test_responses_schema_failure_cancels_pending_media_tasks(db, monkeypatch):
 
 
 def test_stream_disconnect_cancels_pending_media_tasks(db, monkeypatch):
+    """Verify client stream disconnect cancels running background media tasks."""
     started: list[asyncio.Task] = []
 
     async def slow_download(_img):
@@ -376,6 +387,7 @@ def test_stream_disconnect_cancels_pending_media_tasks(db, monkeypatch):
 
 
 def test_responses_disconnect_cancels_pending_media_tasks(db, monkeypatch):
+    """Verify Responses stream disconnect aborts running media download tasks."""
     started: list[asyncio.Task] = []
 
     async def slow_download(_img):

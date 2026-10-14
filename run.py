@@ -1,3 +1,5 @@
+"""Application entry point for running the Gemini FastAPI server."""
+
 import os
 import sys
 

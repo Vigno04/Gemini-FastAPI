@@ -1,3 +1,5 @@
+"""Logging setup and loguru handler configuration."""
+
 import inspect
 import logging
 import sys
@@ -12,14 +14,14 @@ def setup_logging(
     backtrace: bool = True,
     colorize: bool = True,
 ) -> None:
-    """
-    Setup loguru logging configuration to unify all project logging output
+    """Setup loguru logging configuration to unify all project logging output.
 
     Args:
         level: Log level
         diagnose: Whether to enable diagnostic information
         backtrace: Whether to enable backtrace information
         colorize: Whether to enable colors
+
     """
     # Reset all logger handlers
     logger.remove()
@@ -41,7 +43,7 @@ def setup_logging(
 
 
 def _setup_logging_intercept() -> None:
-    """Setup standard logging library interceptor to redirect to loguru"""
+    """Setup standard logging library interceptor to redirect to loguru."""
 
     class InterceptHandler(logging.Handler):
         def emit(self, record: logging.LogRecord) -> None:

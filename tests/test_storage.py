@@ -20,6 +20,7 @@ MODEL = "gemini-3-pro"
 
 @pytest.fixture
 def store(tmp_path):
+    """Provide an isolated LMDB conversation store instance for testing."""
     opened = LMDBConversationStore.open_isolated(db_path=str(tmp_path / "lmdb"))
     try:
         yield opened
@@ -40,6 +41,7 @@ def _raw_keys(opened: LMDBConversationStore) -> list[str]:
 
 
 def test_a_stored_conversation_is_found_again(store):
+    """Verify a stored conversation can be retrieved by model and messages."""
     messages = _exchange()
     store.store(CLIENT_ID, MODEL, messages, metadata=["c", "r", "rc"])
 
@@ -50,6 +52,7 @@ def test_a_stored_conversation_is_found_again(store):
 
 
 def test_a_different_model_does_not_match(store):
+    """Verify searching with a different model does not return stored session."""
     messages = _exchange()
     store.store(CLIENT_ID, MODEL, messages, metadata=["c", "r", "rc"])
     assert store.find("gemini-3-flash", messages) is None
@@ -116,6 +119,7 @@ def test_raw_data_still_discriminates_and_ignores_key_order(store):
 
 
 def test_keys_reports_conversations_without_index_entries(store):
+    """Verify store.keys() only reports conversation keys without index entries."""
     store.store(CLIENT_ID, MODEL, _exchange(), metadata=["c", "r", "rc"])
 
     assert len(store.keys()) == 1
@@ -124,6 +128,7 @@ def test_keys_reports_conversations_without_index_entries(store):
 
 
 def test_eviction_removes_the_record_and_its_indexes(store):
+    """Verify evicting a conversation removes its record and lookup indexes."""
     messages = _exchange()
     store.store(CLIENT_ID, MODEL, messages, metadata=["c", "r", "rc"])
     conv = store.find(MODEL, messages)
@@ -135,6 +140,7 @@ def test_eviction_removes_the_record_and_its_indexes(store):
 
 
 def test_clear_empties_the_store(store):
+    """Verify clear() deletes all records and index entries from the store."""
     store.store(CLIENT_ID, MODEL, _exchange("one"), metadata=["c", "r", "rc"])
     store.store(CLIENT_ID, MODEL, _exchange("two"), metadata=["c", "r", "rc"])
 
@@ -144,7 +150,7 @@ def test_clear_empties_the_store(store):
 
 
 def test_retention_keeps_a_conversation_that_is_still_in_use(store):
-    """Retention follows last use; a long-running conversation is not old just because it began early."""
+    """Verify retention retains active conversations updated recently."""
     messages = _exchange()
     store.store(CLIENT_ID, MODEL, messages, metadata=["c", "r", "rc"])
 
@@ -161,6 +167,7 @@ def test_retention_keeps_a_conversation_that_is_still_in_use(store):
 
 
 def test_retention_removes_a_conversation_last_touched_before_the_cutoff(store):
+    """Verify cleanup_before removes conversations older than the cutoff threshold."""
     messages = _exchange()
     store.store(CLIENT_ID, MODEL, messages, metadata=["c", "r", "rc"])
 
@@ -170,6 +177,7 @@ def test_retention_removes_a_conversation_last_touched_before_the_cutoff(store):
 
 
 def test_lookup_entries_are_written_under_the_current_index_version(store):
+    """Verify lookup index entries include current version prefix."""
     store.store(CLIENT_ID, MODEL, _exchange(), metadata=["c", "r", "rc"])
 
     index_keys = [key for key in _raw_keys(store) if store._is_index_key(key)]
@@ -203,6 +211,7 @@ def test_indexes_from_a_superseded_version_are_pruned(tmp_path):
 
 
 def test_pruning_leaves_current_version_entries_alone(store):
+    """Verify prune_stale_indexes preserves current version index entries."""
     messages = _exchange()
     store.store(CLIENT_ID, MODEL, messages, metadata=["c", "r", "rc"])
 

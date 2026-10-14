@@ -1,3 +1,5 @@
+"""Main application entry point and lifespan event setup."""
+
 import asyncio
 import contextlib
 import mimetypes
@@ -37,16 +39,15 @@ RETENTION_CLEANUP_INTERVAL_SECONDS = 6 * 60 * 60  # Check every 6 hours
 
 
 async def _run_retention_cleanup(stop_event: asyncio.Event) -> None:
-    """
-    Periodically enforce LMDB retention policy until the stop_event is set.
-    """
+    """Periodically enforce LMDB retention policy until the stop_event is set."""
     store = LMDBConversationStore()
     if store.retention_days <= 0:
         logger.info("LMDB retention cleanup disabled; skipping scheduler.")
         return
 
     logger.info(
-        f"Starting LMDB retention cleanup task (retention={store.retention_days} day(s), interval={RETENTION_CLEANUP_INTERVAL_SECONDS} seconds)."
+        f"Starting LMDB retention cleanup task (retention={store.retention_days} day(s), "
+        f"interval={RETENTION_CLEANUP_INTERVAL_SECONDS} seconds)."
     )
 
     while not stop_event.is_set():
@@ -69,6 +70,7 @@ async def _run_retention_cleanup(stop_event: asyncio.Event) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Manage application startup and shutdown lifecycles."""
     cleanup_stop_event = asyncio.Event()
 
     pool = GeminiClientPool()
@@ -120,6 +122,7 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    """Create and configure the FastAPI application instance."""
     app = FastAPI(
         title="Gemini API Server",
         description="OpenAI-compatible API for Gemini Web",

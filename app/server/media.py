@@ -1,3 +1,5 @@
+"""Media retrieval router for serving generated images and files."""
+
 import re
 from pathlib import Path
 
@@ -32,6 +34,7 @@ def _resolve_media_file(media_store: Path, filename: str) -> Path | None:
 
 @router.get("/media/{filename}", tags=["Media"])
 async def get_media(filename: str, token: str | None = Query(default=None)):
+    """Retrieve generated media file by filename with token verification."""
     if not verify_media_token(filename, token):
         raise HTTPException(status_code=403, detail="Invalid token")
 

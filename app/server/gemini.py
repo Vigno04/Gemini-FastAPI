@@ -858,7 +858,8 @@ def _create_gemini_streaming_response(
                             )
                         ],
                     )
-                    yield f"data: {orjson.dumps(think_resp.model_dump(mode='json', exclude_none=True)).decode('utf-8')}\n\n"
+                    payload = think_resp.model_dump(mode="json", exclude_none=True)
+                    yield f"data: {orjson.dumps(payload).decode('utf-8')}\n\n"
 
                 if text_delta := chunk.text_delta:
                     full_text += text_delta
@@ -876,7 +877,8 @@ def _create_gemini_streaming_response(
                                 )
                             ],
                         )
-                        yield f"data: {orjson.dumps(chunk_resp.model_dump(mode='json', exclude_none=True)).decode('utf-8')}\n\n"
+                        payload = chunk_resp.model_dump(mode="json", exclude_none=True)
+                        yield f"data: {orjson.dumps(payload).decode('utf-8')}\n\n"
 
         except Exception as e:
             logger.exception(f"[Gemini API] Streaming error: {e}")
@@ -903,7 +905,8 @@ def _create_gemini_streaming_response(
                     )
                 ],
             )
-            yield f"data: {orjson.dumps(chunk_resp.model_dump(mode='json', exclude_none=True)).decode('utf-8')}\n\n"
+            payload = chunk_resp.model_dump(mode="json", exclude_none=True)
+            yield f"data: {orjson.dumps(payload).decode('utf-8')}\n\n"
 
         # --- post-processing: protective layer so the SSE tail survives errors ---
         # The two expected failures are reported with their own message and status, matching the
@@ -938,7 +941,8 @@ def _create_gemini_streaming_response(
                         )
                     ],
                 )
-                yield f"data: {orjson.dumps(structured_chunk.model_dump(mode='json', exclude_none=True)).decode('utf-8')}\n\n"
+                payload = structured_chunk.model_dump(mode="json", exclude_none=True)
+                yield f"data: {orjson.dumps(payload).decode('utf-8')}\n\n"
 
             image_store = get_media_store_dir()
             seen_hashes: set[str] = set()
@@ -975,7 +979,8 @@ def _create_gemini_streaming_response(
                             )
                         ],
                     )
-                    yield f"data: {orjson.dumps(img_chunk.model_dump(mode='json', exclude_none=True)).decode('utf-8')}\n\n"
+                    payload = img_chunk.model_dump(mode="json", exclude_none=True)
+                    yield f"data: {orjson.dumps(payload).decode('utf-8')}\n\n"
                     token = get_media_token(fname)
                     img_url = f"{base_url}/media/{fname}?token={token}"
                     storage_output += f"\n\n![{fname}]({img_url})"
@@ -1028,7 +1033,8 @@ def _create_gemini_streaming_response(
                 ),
                 modelVersion=model_name,
             )
-            yield f"data: {orjson.dumps(final_resp.model_dump(mode='json', exclude_none=True)).decode('utf-8')}\n\n"
+            payload = final_resp.model_dump(mode="json", exclude_none=True)
+            yield f"data: {orjson.dumps(payload).decode('utf-8')}\n\n"
 
             _persist_conversation(
                 db,

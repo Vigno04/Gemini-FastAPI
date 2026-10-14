@@ -52,6 +52,7 @@ def _chunks(total: int, size: int = 40):
 
 
 def test_a_body_within_the_ceiling_reaches_the_route():
+    """Verify requests with body size below the limit succeed."""
     with TestClient(_build_app()) as client:
         response = client.post("/v1/echo", content=b"x" * (LIMIT - 1))
     assert response.status_code == 200
@@ -59,12 +60,14 @@ def test_a_body_within_the_ceiling_reaches_the_route():
 
 
 def test_a_body_exactly_at_the_ceiling_is_allowed():
+    """Verify requests with body size exactly at the limit succeed."""
     with TestClient(_build_app()) as client:
         response = client.post("/v1/echo", content=b"x" * LIMIT)
     assert response.status_code == 200
 
 
 def test_a_declared_oversize_body_is_refused():
+    """Verify requests with declared Content-Length over the limit are rejected."""
     with TestClient(_build_app()) as client:
         response = client.post("/v1/echo", content=b"x" * (LIMIT + 1))
     assert response.status_code == 413
@@ -72,6 +75,7 @@ def test_a_declared_oversize_body_is_refused():
 
 
 def test_a_chunked_oversize_body_is_refused():
+    """Verify chunked transfer requests exceeding the size limit are rejected."""
     with TestClient(_build_app()) as client:
         response = client.post("/v1/echo", content=_chunks(LIMIT * 5))
     assert response.status_code == 413
@@ -80,6 +84,7 @@ def test_a_chunked_oversize_body_is_refused():
 
 @pytest.mark.parametrize("content", [b"x" * (LIMIT + 1), None], ids=["declared", "chunked"])
 def test_the_gemini_surface_gets_googles_error_envelope(content):
+    """Verify oversize requests to Gemini endpoints return Google error format."""
     body = content if content is not None else _chunks(LIMIT * 5)
     with TestClient(_build_app()) as client:
         response = client.post("/v1beta/models/x:generateContent", content=body)
@@ -90,6 +95,7 @@ def test_the_gemini_surface_gets_googles_error_envelope(content):
 
 
 def test_a_zero_ceiling_disables_the_guard():
+    """Verify setting limit to zero disables body size enforcement."""
     with TestClient(_build_app(0)) as client:
         response = client.post("/v1/echo", content=b"x" * (LIMIT * 100))
     assert response.status_code == 200
@@ -120,6 +126,7 @@ def test_an_unparsable_content_length_falls_back_to_counting():
 
 
 def test_requests_without_a_body_are_untouched():
+    """Verify GET requests without a body pass through unaffected."""
     app = _build_app()
 
     @app.get("/v1/ping")
@@ -158,8 +165,10 @@ def test_every_extension_this_server_can_produce_is_servable(tmp_path, suffix):
     ],
 )
 def test_names_this_server_never_generates_are_refused(tmp_path, filename):
+    """Verify path traversal or malformed filenames are refused by media resolver."""
     assert _resolve_media_file(tmp_path, filename) is None
 
 
 def test_a_matching_name_with_no_file_behind_it_is_refused(tmp_path):
+    """Verify valid filename pattern without existing file returns None."""
     assert _resolve_media_file(tmp_path, f"{STEM}.png") is None

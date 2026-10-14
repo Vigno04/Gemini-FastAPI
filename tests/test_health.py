@@ -1,3 +1,5 @@
+"""Tests for the health check endpoint and guest mode behavior."""
+
 import asyncio
 
 import pytest
@@ -36,6 +38,7 @@ def test_guest_mode_controls_client_health_status(
     expected_status: int,
     expected_ok: bool,
 ):
+    """Verify guest mode settings control reported client health status."""
     monkeypatch.setattr(health, "GeminiClientPool", lambda: _Pool(client_status))
     monkeypatch.setattr(health, "LMDBConversationStore", _Store)
     monkeypatch.setattr(health.g_config.gemini, "guest_mode", guest_mode)
@@ -48,6 +51,7 @@ def test_guest_mode_controls_client_health_status(
 
 
 def test_guest_mode_defaults_to_adaptive():
+    """Verify default guest mode setting is adaptive."""
     config = GeminiConfig(clients=[], auto_refresh=True, verbose=True)
 
     assert config.guest_mode == GuestMode.ADAPTIVE

@@ -1,3 +1,5 @@
+"""CLI utility to dump LMDB records as JSON."""
+
 import argparse
 from collections.abc import Iterable
 from pathlib import Path
@@ -48,6 +50,7 @@ def dump_lmdb(path: Path, keys: Iterable[str] | None = None) -> None:
 
 
 def main() -> None:
+    """Parse command-line arguments and dump LMDB records."""
     parser = argparse.ArgumentParser(description="Dump LMDB records as JSON")
     parser.add_argument("path", type=Path, help="Path to LMDB directory")
     parser.add_argument("keys", nargs="*", help="Keys to retrieve")

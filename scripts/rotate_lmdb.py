@@ -1,3 +1,5 @@
+"""CLI utility to clean up expired conversations from LMDB."""
+
 import argparse
 import os
 import sys
@@ -59,6 +61,7 @@ def rotate_lmdb(path: Path, keep: str, map_size: int = DEFAULT_MAP_SIZE) -> int:
 
 
 def main() -> None:
+    """Parse command-line arguments and rotate LMDB records."""
     parser = argparse.ArgumentParser(description="Remove outdated LMDB records")
     parser.add_argument("path", type=Path, help="Path to LMDB directory")
     parser.add_argument(

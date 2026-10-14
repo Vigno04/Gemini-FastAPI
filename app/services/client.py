@@ -1,3 +1,5 @@
+"""GeminiClient wrapper providing connection management and message formatting."""
+
 import io
 from pathlib import Path
 from typing import Any
@@ -25,6 +27,7 @@ class GeminiClientWrapper(GeminiClient):
     """Gemini client with helper methods."""
 
     def __init__(self, client_id: str, **kwargs):
+        """Initialize client wrapper with client ID and custom configuration options."""
         self._cfg_impersonate: str | None = kwargs.pop("impersonate", None)
         super().__init__(**kwargs)
         self.id = client_id
@@ -36,9 +39,7 @@ class GeminiClientWrapper(GeminiClient):
         self.latest_chat_cid: str | None = None
 
     async def init(self, *args: Any, **kwargs: Any) -> None:
-        """
-        Inject default configuration values from global settings.
-        """
+        """Inject default configuration values from global settings."""
         config = g_config.gemini
         init_kwargs: dict[str, Any] = {
             "timeout": config.timeout,
@@ -61,11 +62,11 @@ class GeminiClientWrapper(GeminiClient):
             raise
 
     def running(self) -> bool:
+        """Return whether the underlying client is currently running."""
         return self._running
 
     def is_healthy(self) -> bool:
-        """
-        Check if the client is healthy.
+        """Check if the client is healthy.
 
         A client is healthy if it is active (running or initialized with auto-close)
         and the account status is available.
@@ -127,8 +128,8 @@ class GeminiClientWrapper(GeminiClient):
     async def _process_content_item(
         item: Any, role: str, tempdir: Path | None
     ) -> tuple[str | None, Path | str | None]:
-        """
-        Process a single content item (text, image_url, file, input_audio).
+        """Process a single content item (text, image_url, file, input_audio).
+
         Returns a tuple of (text_fragment, file_path).
         """
         if item.type == "text":
@@ -156,9 +157,7 @@ class GeminiClientWrapper(GeminiClient):
     async def _extract_content_and_files(
         message: AppMessage, tempdir: Path | None
     ) -> tuple[list[str], list[Path | str]]:
-        """
-        Extract text fragments and files from message content.
-        """
+        """Extract text fragments and files from message content."""
         files: list[Path | str] = []
         text_fragments: list[str] = []
 
@@ -185,9 +184,7 @@ class GeminiClientWrapper(GeminiClient):
     def _format_tool_results(
         text_fragments: list[str], tool_name: str | None, wrap_tool: bool
     ) -> list[str]:
-        """
-        Format tool results into the PascalCase technical protocol blocks.
-        """
+        """Format tool results into the PascalCase technical protocol blocks."""
         tool_name = tool_name or "unknown"
         combined_content = "\n".join(text_fragments).strip()
         res_block = (
@@ -197,9 +194,7 @@ class GeminiClientWrapper(GeminiClient):
 
     @staticmethod
     def _format_tool_calls(message: AppMessage) -> str | None:
-        """
-        Format tool calls into the PascalCase technical protocol blocks.
-        """
+        """Format tool calls into the PascalCase technical protocol blocks."""
         if not message.tool_calls:
             return None
 
@@ -232,8 +227,8 @@ class GeminiClientWrapper(GeminiClient):
         tagged: bool = True,
         wrap_tool: bool = True,
     ) -> tuple[str, list[Path | str]]:
-        """
-        Process a Message into Gemini API format using the PascalCase technical protocol.
+        """Process a Message into Gemini API format using the PascalCase technical protocol.
+
         Extracts text, handles files, and appends ToolCalls/ToolResults blocks.
         """
         text_fragments, files = await GeminiClientWrapper._extract_content_and_files(
@@ -259,6 +254,7 @@ class GeminiClientWrapper(GeminiClient):
     async def process_conversation(
         messages: list[AppMessage], tempdir: Path | None = None
     ) -> tuple[str, list[str | Path | bytes | io.BytesIO]]:
+        """Convert a list of AppMessages into formatted text and files for Gemini."""
         conversation: list[str] = []
         files: list[str | Path | bytes | io.BytesIO] = []
 

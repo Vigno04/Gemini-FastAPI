@@ -91,6 +91,7 @@ def test_non_json_schema_response_formats_are_accepted(format_type):
 
 
 def test_json_schema_sets_strict_from_the_request():
+    """Verify json_schema format properly applies strict flag from request."""
     for strict in (True, False):
         requirement = _build_structured_requirement(
             {"type": "json_schema", "json_schema": {"schema": OBJECT_SCHEMA, "strict": strict}}
@@ -101,6 +102,7 @@ def test_json_schema_sets_strict_from_the_request():
 
 @pytest.mark.parametrize("strict", ["false", "true", 0, 1, None])
 def test_chat_json_schema_rejects_non_boolean_strict_values(strict):
+    """Verify non-boolean strict settings raise ValueError."""
     with pytest.raises(ValueError, match="strict must be a boolean"):
         _build_structured_requirement(
             {"type": "json_schema", "json_schema": {"schema": OBJECT_SCHEMA, "strict": strict}}
@@ -115,6 +117,7 @@ def test_chat_json_schema_rejects_non_boolean_strict_values(strict):
     ],
 )
 def test_malformed_json_schema_is_still_rejected(response_format):
+    """Verify malformed json_schema formats without schema raise ValueError."""
     with pytest.raises(ValueError, match="schema"):
         _build_structured_requirement(response_format)
 
@@ -140,6 +143,7 @@ def test_an_unrepresentable_schema_is_asked_for_but_not_enforced(schema):
 
 @pytest.mark.parametrize("response_format", [None, {}, "json_schema", ["json_schema"]])
 def test_absent_or_non_object_response_format_is_ignored(response_format):
+    """Verify absent or non-dict response format is ignored."""
     assert _build_structured_requirement(response_format) is None
 
 
@@ -162,6 +166,7 @@ def test_json_schema_defaults_to_best_effort_and_a_generated_name():
 
 
 def test_non_strict_schema_omits_the_exact_conformance_line():
+    """Verify non-strict schema instruction omits strict prompt line."""
     requirement = _build_structured_requirement(
         {"type": "json_schema", "json_schema": {"schema": OBJECT_SCHEMA, "strict": False}}
     )
@@ -179,6 +184,7 @@ def test_tool_call_turn_is_not_failed_by_a_response_format():
 
 
 def test_strict_violation_raises_and_best_effort_violation_degrades():
+    """Verify strict violation raises error while best-effort returns text."""
     with pytest.raises(StructuredOutputValidationError):
         process_llm_output(None, '{"b": 1}', _requirement(OBJECT_SCHEMA))
 
@@ -196,6 +202,7 @@ def test_a_reply_with_no_text_is_not_a_schema_violation(raw_text):
 
 
 def test_text_alongside_a_tool_call_is_still_canonicalized():
+    """Verify structured output alongside tool call is properly canonicalized."""
     raw = f'```json\n{{"a": "x"}}\n```\n{TOOL_CALL_OUTPUT}'
     _, visible, _, tool_calls = process_llm_output(None, raw, _requirement(OBJECT_SCHEMA))
     assert [call.function.name for call in tool_calls] == ["get_weather"]
@@ -203,6 +210,7 @@ def test_text_alongside_a_tool_call_is_still_canonicalized():
 
 
 def test_conforming_output_is_canonicalized():
+    """Verify conforming structured output is extracted and canonicalized."""
     _, visible, storage, _ = process_llm_output(
         None, '```json\n{"a": "x"}\n```', _requirement(OBJECT_SCHEMA)
     )
@@ -226,6 +234,7 @@ def test_unusable_schemas_leave_the_reply_unverified_rather_than_failing_it(sche
 
 
 def test_json_mode_requires_only_that_the_payload_parses():
+    """Verify JSON mode requires only valid JSON parsing."""
     requirement = _requirement({}, strict=False)
     assert canonicalize_structured_output('{"anything": [1]}', requirement) == '{"anything":[1]}'
     assert canonicalize_structured_output("not json", requirement) is None
@@ -278,6 +287,7 @@ def test_an_ordinary_large_payload_fits_the_regex_budget():
 
 
 def test_bounded_validator_preserves_pattern_properties_and_additional_properties():
+    """Verify bounded validator enforces patternProperties and additionalProperties."""
     requirement = _requirement(
         {
             "type": "object",
@@ -298,6 +308,7 @@ def test_bounded_validator_preserves_pattern_properties_and_additional_propertie
     ],
 )
 def test_text_format_accepts_every_standard_variant(format_payload, expected_type):
+    """Verify Responses API text.format accepts standard schema types."""
     request = ResponseCreateRequest.model_validate(
         {"model": "m", "input": "hi", "text": {"format": format_payload}}
     )
@@ -306,6 +317,7 @@ def test_text_format_accepts_every_standard_variant(format_payload, expected_typ
 
 
 def test_default_text_block_does_not_conflict_with_the_legacy_extension():
+    """Verify default text format doesn't conflict with legacy response_format."""
     request = ResponseCreateRequest.model_validate(
         {
             "model": "m",
@@ -318,6 +330,7 @@ def test_default_text_block_does_not_conflict_with_the_legacy_extension():
 
 
 def test_neither_format_block_yields_no_requirement():
+    """Verify omitting format blocks yields no structured output requirement."""
     assert (
         _responses_response_format(
             ResponseCreateRequest.model_validate({"model": "m", "input": "hi"})
@@ -327,6 +340,7 @@ def test_neither_format_block_yields_no_requirement():
 
 
 def test_legacy_response_format_alone_is_honored():
+    """Verify legacy response_format parameter is honored in Responses API."""
     request = ResponseCreateRequest.model_validate(
         {"model": "m", "input": "hi", "response_format": {"type": "json_object"}}
     )
@@ -334,6 +348,7 @@ def test_legacy_response_format_alone_is_honored():
 
 
 def test_text_format_json_schema_defaults_name_and_strict():
+    """Verify Responses API json_schema defaults name to response and strict to False."""
     request = ResponseCreateRequest.model_validate(
         {
             "model": "m",
@@ -349,6 +364,7 @@ def test_text_format_json_schema_defaults_name_and_strict():
 
 @pytest.mark.parametrize("strict", ["false", "true", 0, 1])
 def test_responses_json_schema_rejects_non_boolean_strict_values(strict):
+    """Verify invalid strict values in Responses API fail schema validation."""
     with pytest.raises(ValidationError):
         ResponseCreateRequest.model_validate(
             {
@@ -366,6 +382,7 @@ def test_responses_json_schema_rejects_non_boolean_strict_values(strict):
 
 
 def test_text_format_json_schema_without_a_schema_is_rejected():
+    """Verify Responses json_schema format without schema raises ValueError."""
     request = ResponseCreateRequest.model_validate(
         {"model": "m", "input": "hi", "text": {"format": {"type": "json_schema", "name": "r"}}}
     )
@@ -374,6 +391,7 @@ def test_text_format_json_schema_without_a_schema_is_rejected():
 
 
 def test_two_conflicting_formats_are_rejected():
+    """Verify specifying conflicting text.format and response_format is rejected."""
     request = ResponseCreateRequest.model_validate(
         {
             "model": "m",
@@ -406,6 +424,7 @@ def test_both_surfaces_resolve_an_omitted_strict_the_same_way():
 
 @pytest.mark.parametrize(("requested", "applied"), [(True, True), (False, False), (None, False)])
 def test_the_echoed_strict_reports_what_was_enforced(requested, applied):
+    """Verify echoed response payload reflects enforced strict flag."""
     json_schema: dict = {"name": "r", "schema": OBJECT_SCHEMA}
     if requested is not None:
         json_schema["strict"] = requested
@@ -464,6 +483,7 @@ def test_invalid_response_json_schema_is_rejected():
 
 
 def test_untranslatable_response_schema_drops_enforcement_rather_than_failing():
+    """Verify untranslatable OpenAPI schemas drop enforcement instead of failing."""
     request = _gemini_request(
         generationConfig={
             "responseMimeType": "application/json",
@@ -504,6 +524,7 @@ def test_the_gemini_surface_asks_for_the_schema_without_enforcing_it():
     ],
 )
 def test_gemini_json_mode_survives_absent_or_empty_schemas(generation_config):
+    """Verify Gemini JSON mode operates with absent or empty responseSchema."""
     schema, requirement = _gemini_structured_requirement(
         _gemini_request(generationConfig=generation_config)
     )
@@ -515,16 +536,19 @@ def test_gemini_json_mode_survives_absent_or_empty_schemas(generation_config):
 
 
 def test_no_response_schema_yields_no_requirement():
+    """Verify omitting responseSchema produces no structured output requirement."""
     schema, requirement = _gemini_structured_requirement(_gemini_request())
     assert schema is None
     assert requirement is None
 
 
 def test_normalize_openapi_schema_leaves_json_schema_alone():
+    """Verify normalize_openapi_schema preserves standard JSON Schema."""
     assert normalize_openapi_schema(OBJECT_SCHEMA) == OBJECT_SCHEMA
 
 
 def test_normalize_openapi_schema_recurses_through_containers():
+    """Verify normalize_openapi_schema recursively normalizes nested schemas."""
     assert normalize_openapi_schema(
         {
             "type": "ARRAY",
@@ -556,11 +580,13 @@ def test_normalize_openapi_schema_treats_property_names_as_names():
 
 
 def test_normalize_openapi_schema_drops_nullable_false_without_widening():
+    """Verify nullable False is stripped without widening type to null."""
     assert normalize_openapi_schema({"type": "STRING", "nullable": False}) == {"type": "string"}
 
 
 @pytest.mark.parametrize("value", ["text", None, 7, True])
 def test_normalize_openapi_schema_passes_non_schemas_through(value):
+    """Verify non-schema inputs are returned unchanged by normalizer."""
     assert normalize_openapi_schema(value) == value
 
 
@@ -594,6 +620,7 @@ def test_unrepresentable_content_is_refused(overrides, expected):
 
 
 def test_file_data_in_system_instruction_is_refused():
+    """Verify fileData in Gemini system instruction is rejected."""
     request = _gemini_request(
         systemInstruction={"parts": [{"fileData": {"mimeType": "text/plain", "fileUri": "gs://x"}}]}
     )
@@ -616,6 +643,7 @@ _TOOLS = [
 def test_allowed_function_names_only_narrows_the_modes_that_use_it(
     mode, expected_tools, expected_choice
 ):
+    """Verify allowedFunctionNames only filters tools in modes that use it."""
     request = _gemini_request(
         tools=_TOOLS,
         toolConfig={"functionCallingConfig": {"mode": mode, "allowedFunctionNames": ["a"]}},
@@ -628,6 +656,7 @@ def test_allowed_function_names_only_narrows_the_modes_that_use_it(
 
 
 def test_any_mode_with_one_allowed_name_forces_that_function():
+    """Verify ANY mode with one allowedFunctionNames selects that function."""
     request = _gemini_request(
         tools=_TOOLS,
         toolConfig={"functionCallingConfig": {"mode": "ANY", "allowedFunctionNames": ["a"]}},
@@ -638,6 +667,7 @@ def test_any_mode_with_one_allowed_name_forces_that_function():
 
 
 def test_any_mode_rejects_undeclared_allowed_names():
+    """Verify ANY mode rejects undeclared allowedFunctionNames."""
     request = _gemini_request(
         tools=_TOOLS,
         toolConfig={"functionCallingConfig": {"mode": "ANY", "allowedFunctionNames": ["zzz"]}},
@@ -655,6 +685,7 @@ def test_any_mode_rejects_undeclared_allowed_names():
     ids=["no-config", "any-unrestricted", "any-multiple-names"],
 )
 def test_any_mode_without_a_single_target_forces_only_that_a_tool_is_called(tool_config):
+    """Verify ANY mode without single target requires calling any available tool."""
     request = _gemini_request(tools=_TOOLS, toolConfig=tool_config)
     tools, choice = _gemini_tools_to_internal(request.tools, request.toolConfig)
     assert [tool.name for tool in tools or []] == ["a", "b"]
@@ -662,6 +693,7 @@ def test_any_mode_without_a_single_target_forces_only_that_a_tool_is_called(tool
 
 
 def test_no_tools_yields_no_tool_choice():
+    """Verify absence of tools yields no tool choice."""
     assert _gemini_tools_to_internal(None, None) == (None, None)
 
 
@@ -696,6 +728,7 @@ _IMAGE = ToolChoiceTypes(type="image_generation")
 def test_forced_tool_choice_failure_detection(
     tool_choice, tool_calls, has_images, has_image_tool, expected
 ):
+    """Verify detection of unmet forced tool choice conditions."""
     result = _tool_choice_failure(
         tool_choice, tool_calls, has_images=has_images, has_image_tool=has_image_tool
     )
@@ -720,6 +753,7 @@ def test_forced_tool_choice_failure_detection(
     ],
 )
 def test_forced_tool_choice_must_name_a_declared_tool(names, has_image_tool, tool_choice, expected):
+    """Verify forced tool choices reference declared tools."""
     result = _tool_choice_declaration_error(names, has_image_tool, tool_choice)
     if expected is None:
         assert result is None
@@ -756,6 +790,7 @@ def _input_message(*parts) -> ResponseInputMessage:
     ],
 )
 def test_responses_input_refuses_only_unusable_content(items, expected):
+    """Verify Responses input validation rejects invalid input items."""
     result = _validate_responses_input(items)
     if expected is None:
         assert result is None
@@ -772,6 +807,7 @@ def test_responses_input_refuses_only_unusable_content(items, expected):
     ],
 )
 def test_tool_result_parts_are_validated_too(output, expected):
+    """Verify tool call output parts undergo input validation."""
     items = [FunctionCallOutput.model_validate({"call_id": "c", "output": output})]
     result = _validate_responses_input(items)
     if expected is None:
@@ -781,11 +817,13 @@ def test_tool_result_parts_are_validated_too(output, expected):
 
 
 def test_non_ascii_data_url_does_not_abort_model_construction():
+    """Verify non-ASCII characters in data URLs don't break content digest."""
     item = AppContentItem(type="image_url", url="data:text/plain;charset=utf-8,Hé")
     assert item.content_digest
 
 
 def test_digest_distinguishes_inline_payloads():
+    """Verify content digests differ for distinct inline payloads."""
     first = base64.b64encode(b"one").decode()
     second = base64.b64encode(b"two").decode()
     assert (
@@ -810,6 +848,7 @@ def test_digest_distinguishes_inline_payloads():
     ],
 )
 def test_mime_extensions_fall_back_to_a_scrubbed_subtype(mime_type, expected):
+    """Verify MIME extensions fall back to sanitized subtypes."""
     suffix = guess_extension_for_mime(mime_type)
     assert suffix == expected
     assert not set(suffix) & set("/\\")
@@ -825,6 +864,7 @@ def test_both_base64_alphabets_decode():
 
 
 def test_base64_accepts_bytes_line_wrapping_and_data_urls():
+    """Verify decode_base64_data handles byte inputs, newlines, and data URLs."""
     payload = b"\x00\x01binary payload\xff"
     encoded = base64.b64encode(payload).decode()
     assert decode_base64_data(encoded.encode()) == payload
@@ -834,6 +874,7 @@ def test_base64_accepts_bytes_line_wrapping_and_data_urls():
 
 
 def test_data_url_without_a_base64_payload_is_rejected():
+    """Verify data URL without base64 indicator is rejected."""
     with pytest.raises(ValueError, match="Data URL"):
         decode_base64_data("data:text/plain,hello")
 
@@ -861,12 +902,14 @@ def test_only_payloads_excluded_from_serialization_get_a_digest():
 
 
 def test_sse_errors_terminate_the_stream():
+    """Verify _sse_error generates error frame terminated by [DONE]."""
     frame = _sse_error("boom", "server_error")
     assert frame.endswith("data: [DONE]\n\n")
     assert '"message":"boom"' in frame
 
 
 def test_digest_survives_a_round_trip_without_the_excluded_bytes():
+    """Verify content digest is preserved through serialization round trips."""
     original = AppContentItem(
         type="file", file_data=base64.b64encode(b"payload").decode(), filename="a.bin"
     )
@@ -893,10 +936,12 @@ def test_digest_survives_a_round_trip_without_the_excluded_bytes():
     ],
 )
 def test_strip_markdown_fence_with_arbitrary_language_tags(payload, expected):
+    """Verify strip_markdown_fence strips backticks and various language tags."""
     assert strip_markdown_fence(payload) == expected
 
 
 def test_tool_call_with_language_tagged_parameter_fences():
+    """Verify extracting tool call parameters wrapped in language-tagged fences."""
     raw_llm_text = (
         "[ToolCalls]\n"
         "[Call:execute_code]\n"

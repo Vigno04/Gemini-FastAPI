@@ -1,3 +1,5 @@
+"""Utility modules for configuration, logging, and helpers."""
+
 from .config import initialize_config
 from .logging import setup_logging
 

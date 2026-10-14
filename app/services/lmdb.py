@@ -1,3 +1,5 @@
+"""LMDB conversation store for persisting and retrieving chat sessions."""
+
 import hashlib
 import string
 from collections.abc import Generator, Mapping
@@ -27,8 +29,8 @@ _VOLATILE_TRANS_TABLE = str.maketrans("", "", string.whitespace + string.punctua
 
 
 def _fuzzy_normalize(text: str | None) -> str | None:
-    """
-    Lowercase and remove all whitespace and punctuation.
+    """Lowercase and remove all whitespace and punctuation.
+
     Used as a fallback for complex/malformed contents matching.
     """
     return None if text is None else text.lower().translate(_VOLATILE_TRANS_TABLE)
@@ -47,9 +49,7 @@ def _normalize_text(text: str | None, fuzzy: bool = False) -> str | None:
 
 
 def _hash_message(message: AppMessage, fuzzy: bool = False) -> str:
-    """
-    Generate a stable, canonical hash for a single message.
-    """
+    """Generate a stable, canonical hash for a single message."""
     core_data: dict[str, Any] = {
         "role": message.role,
         "name": message.name,
@@ -170,13 +170,13 @@ class LMDBConversationStore(metaclass=Singleton):
         max_db_size: int | None = None,
         retention_days: int | None = None,
     ):
-        """
-        Initialize LMDB store.
+        """Initialize LMDB store.
 
         Args:
             db_path: Path to LMDB database directory
             max_db_size: Maximum database size in bytes (default: 256 MB)
             retention_days: Number of days to retain conversations (default: 14, 0 disables cleanup)
+
         """
         if db_path is None:
             db_path = g_config.storage.path
@@ -215,11 +215,11 @@ class LMDBConversationStore(metaclass=Singleton):
 
     @contextmanager
     def _get_transaction(self, write: bool = False) -> Generator[Transaction]:
-        """
-        Context manager for LMDB transactions.
+        """Context manager for LMDB transactions.
 
         Args:
             write: Whether the transaction should be writable.
+
         """
         if not self._env:
             raise RuntimeError("LMDB environment not initialized")
@@ -241,7 +241,7 @@ class LMDBConversationStore(metaclass=Singleton):
 
     @staticmethod
     def _decode_index_value(data: bytes | memoryview) -> list[str]:
-        """Decode index value, handling both legacy single-string and new list-of-strings formats."""
+        """Decode index value for legacy single-string or list-of-strings formats."""
         if not data:
             return []
         data = bytes(data)
@@ -286,8 +286,7 @@ class LMDBConversationStore(metaclass=Singleton):
         metadata: list[str | None],
         chat_scope: str | None = None,
     ) -> None:
-        """
-        Store a conversation model in LMDB.
+        """Store a conversation model in LMDB.
 
         Args:
             client_id: The client identifier
@@ -296,6 +295,7 @@ class LMDBConversationStore(metaclass=Singleton):
             metadata: Session metadata
             chat_scope: Identity of the ephemeral window owning the chat, None if it is a normal
                 chat kept in the account's history
+
         """
         if not messages:
             raise ValueError("Messages list cannot be empty")
@@ -340,14 +340,14 @@ class LMDBConversationStore(metaclass=Singleton):
             raise
 
     def get(self, key: str) -> ConversationInStore | None:
-        """
-        Retrieve conversation data by key.
+        """Retrieve conversation data by key.
 
         Args:
             key: Storage key (hash or custom key)
 
         Returns:
             Conversation or None if not found
+
         """
         try:
             with self._get_transaction(write=False) as txn:
@@ -372,8 +372,8 @@ class LMDBConversationStore(metaclass=Singleton):
         return conv
 
     def find(self, model: str, messages: list[AppMessage]) -> ConversationInStore | None:
-        """
-        Search conversation data by message list.
+        """Search conversation data by message list.
+
         Tries sanitized matching, and finally fuzzy matching.
 
         Args:
@@ -382,6 +382,7 @@ class LMDBConversationStore(metaclass=Singleton):
 
         Returns:
             ConversationInStore or None if not found
+
         """
         if not messages:
             return None
@@ -405,8 +406,7 @@ class LMDBConversationStore(metaclass=Singleton):
         messages: list[AppMessage],
         fuzzy: bool = False,
     ) -> ConversationInStore | None:
-        """
-        Internal find implementation based on a message list.
+        """Internal find implementation based on a message list.
 
         Args:
             model: Model name
@@ -415,6 +415,7 @@ class LMDBConversationStore(metaclass=Singleton):
 
         Returns:
             ConversationInStore or None if not found
+
         """
         prefix = self.FUZZY_LOOKUP_PREFIX if fuzzy else self.HASH_LOOKUP_PREFIX
         target_len = len(messages)
@@ -631,7 +632,8 @@ class LMDBConversationStore(metaclass=Singleton):
 
         if removed:
             logger.info(
-                f"LMDB retention cleanup removed {removed} conversation(s) older than {cutoff.isoformat()}."
+                f"LMDB retention cleanup removed {removed} conversation(s) "
+                f"older than {cutoff.isoformat()}."
             )
 
         return removed

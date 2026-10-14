@@ -1,3 +1,5 @@
+"""Chat completions, responses, and models router implementation."""
+
 import asyncio
 import base64
 import hashlib
@@ -115,7 +117,7 @@ type ProcessedMediaResult = tuple[
 async def _image_to_base64(
     image: Image, temp_dir: Path
 ) -> tuple[str, int | None, int | None, str, str]:
-    """Persist an image provided by gemini_webapi and return base64 plus dimensions, filename, and hash."""
+    """Persist a gemini_webapi image and return base64, dimensions, filename, and hash."""
     if isinstance(image, GeneratedImage):
         try:
             saved_path = await image.save(path=str(temp_dir), full_size=True)
@@ -151,7 +153,7 @@ async def _image_to_base64(
 async def _media_to_local_file(
     media: GeneratedVideo | GeneratedMedia, temp_dir: Path
 ) -> dict[str, tuple[str, str]]:
-    """Persist media and return dict mapping type to (filename, hash)"""
+    """Persist media and return dict mapping type to (filename, hash)."""
     try:
         saved_paths = await media.save(path=str(temp_dir))
         if not saved_paths:
@@ -643,7 +645,7 @@ def _prepare_messages_for_model(
 def _convert_responses_to_app_messages(
     items: Any,
 ) -> list[AppMessage]:
-    """Convert Responses API input items into internal AppMessage objects, skipping incomplete tool calls."""
+    """Convert Responses API input items into internal AppMessage objects."""
     messages: list[AppMessage] = []
 
     if isinstance(items, str):
@@ -696,9 +698,8 @@ def _convert_responses_to_app_messages(
         elif isinstance(item, ResponseFunctionToolCall):
             call_id = item.call_id or item.id
             if not call_id or not item.name or item.arguments is None:
-                logger.warning(
-                    f"Skipping incomplete function_call input item: {reprlib.repr(item.model_dump(mode='json'))}"
-                )
+                dumped = reprlib.repr(item.model_dump(mode="json"))
+                logger.warning(f"Skipping incomplete function_call input item: {dumped}")
                 continue
             messages.append(
                 AppMessage(
@@ -1017,7 +1018,8 @@ async def _find_reusable_session(
                     )
                     remain = messages[search_end:]
                     logger.debug(
-                        f"Match found at prefix length {search_end}/{len(messages)}. Client: {conv.client_id}"
+                        f"Match found at prefix length {search_end}/{len(messages)}. "
+                        f"Client: {conv.client_id}"
                     )
                     return session, client, remain, conv
             except Exception as e:
@@ -1112,11 +1114,13 @@ async def _send_with_split(
         final_files: list[Any] = list(files) if files else []
         final_files.insert(0, file_obj)
         instruction = (
-            "The user's input exceeds the character limit and is provided in the attached file `message.txt`.\n\n"
+            "The user's input exceeds the character limit and is provided in the attached file "
+            "`message.txt`.\n\n"
             "**System Instruction:**\n"
             "1. Read the content of `message.txt`.\n"
             "2. Treat that content as the **primary** user prompt for this turn.\n"
-            "3. Execute the instructions or answer the questions found *inside* that file immediately.\n"
+            "3. Execute the instructions or answer the questions found *inside* that file "
+            "immediately.\n"
         )
         if stream:
             return session.send_message_stream(
@@ -1212,7 +1216,8 @@ async def _send_with_internal_fallback(
             logger.warning(f"Failed to evict stale conversation metadata: {evict_exc}")
 
         logger.warning(
-            "Metadata-backed chat reuse failed; retrying with internal history replay in a fresh chat."
+            "Metadata-backed chat reuse failed; "
+            "retrying with internal history replay in a fresh chat."
         )
         fallback_input, fallback_files = await GeminiClientWrapper.process_conversation(
             full_prepared_messages, tmp_dir
@@ -1238,18 +1243,20 @@ async def _send_with_internal_fallback(
 
 
 class StreamingOutputFilter:
-    """
-    Filter to suppress technical protocol markers, tool calls, and system hints from the stream.
+    """Filter to suppress technical protocol markers and tool calls from stream.
+
     Uses a stack-based state machine to handle nested fragmented markers.
     """
 
     def __init__(self):
+        """Initialize the streaming output filter state."""
         self.buffer = ""
         self.stack = ["NORMAL"]
         self.current_role = ""
 
     @property
     def state(self):
+        """Return the current filter state from top of the stack."""
         return self.stack[-1]
 
     def _is_outputting(self) -> bool:
@@ -1259,6 +1266,7 @@ class StreamingOutputFilter:
         return self.state == "NORMAL" or (self.state == "IN_BLOCK" and self.current_role != "tool")
 
     def process(self, chunk: str) -> str:
+        """Process an incoming stream text chunk and return sanitized output."""
         self.buffer += chunk
         output = []
 
@@ -1393,8 +1401,8 @@ def _create_real_streaming_response(
     structured_requirement: StructuredOutputRequirement | None = None,
     tool_choice: Any = None,
 ) -> StreamingResponse:
-    """
-    Create a real-time streaming response.
+    """Create a real-time streaming response for Chat Completions.
+
     Reconciles manual delta accumulation with the model's final authoritative state.
     Emits typed image and media results as incremental markdown deltas.
     """
@@ -1524,8 +1532,9 @@ def _create_real_streaming_response(
                     str(exc), "invalid_model_output", "response_format", "schema_validation_failed"
                 )
                 return
-            # No `has_images` escape hatch here: Chat Completions has no image-generation tool, so an
-            # image Gemini volunteers on its own cannot stand in for a function call that was forced.
+            # No `has_images` escape hatch here: Chat Completions has no image-generation tool,
+            # so an image Gemini volunteers on its own cannot stand in for a function call
+            # that was forced.
             if choice_error := _tool_choice_failure(tool_choice, detected_tool_calls):
                 await discard_media_tasks()
                 yield _sse_error(
@@ -1691,9 +1700,10 @@ def _create_responses_real_streaming_response(
     structured_requirement: StructuredOutputRequirement | None = None,
     has_image_tool: bool = False,
 ) -> StreamingResponse:
-    """
-    Create a real-time streaming response for the Responses API.
-    Ensures final accumulated text and thoughts are synchronized and follow the formal event stream spec.
+    """Create a real-time streaming response for the Responses API.
+
+    Ensures final accumulated text and thoughts are synchronized and follow the formal
+    event stream spec.
     Emits typed image and media results as incremental response output text events.
     """
     base_event = {
@@ -2192,7 +2202,8 @@ def _create_responses_real_streaming_response(
 
             if media_tasks:
                 logger.debug(
-                    f"Waiting for {len(media_tasks)} background media tasks in Responses with heartbeat..."
+                    f"Waiting for {len(media_tasks)} background media tasks "
+                    "in Responses with heartbeat..."
                 )
                 while media_tasks:
                     done, pending = await asyncio.wait(
@@ -2229,7 +2240,8 @@ def _create_responses_real_streaming_response(
                                 size=f"{w}x{h}" if w and h else None,
                             )
 
-                            img_link = f"![{fname}]({base_url}media/{fname}?token={get_media_token(fname)})"
+                            token = get_media_token(fname)
+                            img_link = f"![{fname}]({base_url}media/{fname}?token={token})"
                             md_to_add = f"\n\n{img_link}"
 
                             img_index = next_output_index
@@ -2553,6 +2565,7 @@ def _create_responses_real_streaming_response(
 
 @router.get("/v1/models", response_model=ModelListResponse)
 async def list_models(api_key: str = Depends(verify_api_key)):
+    """Return the list of available models in OpenAI format."""
     pool = GeminiClientPool()
     models = await _get_available_models(pool)
     return ModelListResponse(data=models)
@@ -2565,6 +2578,7 @@ async def create_chat_completion(
     api_key: str = Depends(verify_api_key),
     tmp_dir: Path = Depends(get_temp_dir),
 ):
+    """Handle OpenAI-compatible Chat Completions API requests."""
     base_url = str(raw_request.base_url)
     pool, db = GeminiClientPool(), LMDBConversationStore()
     try:
@@ -2614,7 +2628,8 @@ async def create_chat_completion(
         m_input, files = await GeminiClientWrapper.process_conversation(input_msgs, tmp_dir)
 
         logger.debug(
-            f"Reused session {reprlib.repr(session.metadata)} - sending {len(input_msgs)} prepared messages."
+            f"Reused session {reprlib.repr(session.metadata)} - "
+            f"sending {len(input_msgs)} prepared messages."
         )
     else:
         try:
@@ -2830,6 +2845,7 @@ async def create_response(
     api_key: str = Depends(verify_api_key),
     tmp_dir: Path = Depends(get_temp_dir),
 ):
+    """Handle OpenAI-compatible Responses API requests."""
     base_url = str(raw_request.base_url)
     _log_ignored_openai_options(request)
     if input_error := _validate_responses_input(request.input):
@@ -2910,7 +2926,8 @@ async def create_response(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No new messages.")
         m_input, files = await GeminiClientWrapper.process_conversation(msgs, tmp_dir)
         logger.debug(
-            f"Reused session {reprlib.repr(session.metadata)} - sending {len(msgs)} prepared messages."
+            f"Reused session {reprlib.repr(session.metadata)} - "
+            f"sending {len(msgs)} prepared messages."
         )
     else:
         try:
@@ -3089,7 +3106,8 @@ async def create_response(
 
     image_markdown = ""
     for ic in img_calls:
-        img_url = f"{base_url}media/{ic.id}.{ic.output_format}?token={get_media_token(f'{ic.id}.{ic.output_format}')}"
+        media_name = f"{ic.id}.{ic.output_format}"
+        img_url = f"{base_url}media/{media_name}?token={get_media_token(media_name)}"
         image_markdown += f"\n\n![{ic.id}]({img_url})"
 
     if image_markdown:

@@ -1,3 +1,5 @@
+"""Request and response models for OpenAI-compatible endpoints."""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -120,6 +122,8 @@ class ChatCompletionFunctionTool(BaseModel):
 
 
 class ChatCompletionNamedToolChoiceFunction(BaseModel):
+    """Function descriptor specifying the name of a forced tool choice."""
+
     name: str
 
 

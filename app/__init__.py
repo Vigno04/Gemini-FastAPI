@@ -1,1 +1,1 @@
-# Gemini API Server Package
+"""Gemini API server application package."""

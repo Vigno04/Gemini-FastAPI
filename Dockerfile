@@ -1,4 +1,4 @@
-FROM ghcr.io/astral-sh/uv:python3.13-trixie-slim AS builder
+FROM ghcr.io/astral-sh/uv:python3.14-trixie-slim AS builder
 
 WORKDIR /app
 
@@ -21,10 +21,7 @@ set -eux
 uv sync --locked --no-install-project --no-default-groups
 EOF
 
-FROM python:3.13-slim-trixie AS runtime
-
-LABEL org.opencontainers.image.title="Gemini-FastAPI" \
-      org.opencontainers.image.description="Web-based Gemini models wrapped into an OpenAI-compatible API."
+FROM python:3.14-slim-trixie AS runtime
 
 # tally ignore=hadolint/DL3002
 USER root
