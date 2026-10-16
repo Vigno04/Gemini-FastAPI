@@ -92,6 +92,7 @@ class ChatMode(StrEnum):
 
     NORMAL = "normal"
     TEMPORARY = "temporary"
+    AUTO_DELETE = "auto_delete"
 
 
 class GuestMode(StrEnum):
@@ -135,10 +136,20 @@ class GeminiConfig(BaseModel):
     chat_mode: ChatMode = Field(
         default=ChatMode.NORMAL,
         description=(
-            "Chat mode: 'normal' uses standard chats; 'temporary' sends with Google's temporary "
-            "mode (not saved to the account) and applies a tighter effective input limit. "
-            "Warning: Google may close a temporary window at any time mid-conversation, and the "
-            "reply can then come back without the earlier context instead of erroring"
+            "Chat mode: 'normal' uses standard chats (saved to account history); "
+            "'temporary' sends with Google's temporary mode (not saved to account, tighter input limit); "
+            "'auto_delete' uses standard chats for full reliability and context, then automatically "
+            "deletes them from both Google and local storage once expired. "
+            "Warning for 'temporary': Google may close a temporary window at any time mid-conversation, "
+            "and the reply can then come back without the earlier context instead of erroring"
+        ),
+    )
+    auto_delete_ttl: int = Field(
+        default=86400,
+        ge=60,
+        description=(
+            "Inactivity TTL in seconds before an auto_delete conversation is removed from Google "
+            "and LMDB (default: 86400s / 24h)"
         ),
     )
     guest_mode: GuestMode = Field(

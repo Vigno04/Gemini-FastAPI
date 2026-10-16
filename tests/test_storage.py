@@ -208,3 +208,102 @@ def test_pruning_leaves_current_version_entries_alone(store):
 
     assert store.prune_stale_indexes() == 0
     assert store.find(MODEL, messages) is not None
+
+
+def test_auto_delete_conversation_is_collected_for_remote_deletion(store):
+    from app.utils.config import ChatMode
+
+    messages = _exchange()
+    store.store(
+        CLIENT_ID,
+        MODEL,
+        messages,
+        metadata=["c_test123", "r", "rc"],
+        chat_mode=ChatMode.AUTO_DELETE,
+    )
+
+    conv = store.find(MODEL, messages)
+    assert conv is not None
+    assert conv.chat_mode == ChatMode.AUTO_DELETE
+
+    key = store.keys()[0]
+    conv.created_at = datetime.now() - timedelta(hours=25)
+    conv.updated_at = datetime.now() - timedelta(hours=25)
+    with store._get_transaction(write=True) as txn:
+        txn.put(key.encode("utf-8"), orjson.dumps(conv.model_dump(mode="json")), overwrite=True)
+
+    removed, remote_deletions = store.cleanup_expired(auto_delete_ttl=86400)
+    assert removed == 1
+    assert remote_deletions == [(CLIENT_ID, "c_test123")]
+    assert store.find(MODEL, messages) is None
+
+
+def test_normal_conversation_is_not_collected_for_remote_deletion(store):
+    from app.utils.config import ChatMode
+
+    messages = _exchange()
+    store.store(
+        CLIENT_ID,
+        MODEL,
+        messages,
+        metadata=["c_normal123", "r", "rc"],
+        chat_mode=ChatMode.NORMAL,
+    )
+
+    key = store.keys()[0]
+    conv = store.find(MODEL, messages)
+    assert conv is not None
+    conv.created_at = datetime.now() - timedelta(days=20)
+    conv.updated_at = datetime.now() - timedelta(days=20)
+    with store._get_transaction(write=True) as txn:
+        txn.put(key.encode("utf-8"), orjson.dumps(conv.model_dump(mode="json")), overwrite=True)
+
+    removed, remote_deletions = store.cleanup_expired(retention_days=14)
+    assert removed == 1
+    assert remote_deletions == []
+    assert store.find(MODEL, messages) is None
+
+
+def test_multi_turn_auto_delete_does_not_remotely_delete_cid_if_newer_turn_is_active(store):
+    from app.services.lmdb import _hash_conversation
+    from app.utils.config import ChatMode
+
+    turn1 = _exchange("turn 1")
+    turn2 = [
+        *turn1,
+        AppMessage(role="user", content="turn 2"),
+        AppMessage(role="assistant", content="reply 2"),
+    ]
+
+    cid = "c_shared_123"
+    store.store(CLIENT_ID, MODEL, turn1, metadata=[cid, "r", "rc"], chat_mode=ChatMode.AUTO_DELETE)
+    store.store(CLIENT_ID, MODEL, turn2, metadata=[cid, "r", "rc"], chat_mode=ChatMode.AUTO_DELETE)
+
+    # Age turn 1 to be expired (> 24h), keep turn 2 fresh
+    conv1 = store.find(MODEL, turn1)
+    assert conv1 is not None
+    conv1.updated_at = datetime.now() - timedelta(hours=25)
+    key1 = _hash_conversation(CLIENT_ID, MODEL, turn1)
+    with store._get_transaction(write=True) as txn:
+        txn.put(key1.encode("utf-8"), orjson.dumps(conv1.model_dump(mode="json")), overwrite=True)
+
+    # First cleanup: turn 1 expires, but turn 2 is active with the same cid
+    removed, remote_deletions = store.cleanup_expired(auto_delete_ttl=86400)
+    assert removed == 1
+    assert remote_deletions == []  # cid must NOT be deleted yet because turn 2 is active!
+    assert store.find(MODEL, turn1) is None
+    assert store.find(MODEL, turn2) is not None
+
+    # Now age turn 2 as well
+    conv2 = store.find(MODEL, turn2)
+    assert conv2 is not None
+    conv2.updated_at = datetime.now() - timedelta(hours=25)
+    key2 = _hash_conversation(CLIENT_ID, MODEL, turn2)
+    with store._get_transaction(write=True) as txn:
+        txn.put(key2.encode("utf-8"), orjson.dumps(conv2.model_dump(mode="json")), overwrite=True)
+
+    # Second cleanup: turn 2 expires, no active conversations remain for cid
+    removed2, remote_deletions2 = store.cleanup_expired(auto_delete_ttl=86400)
+    assert removed2 == 1
+    assert remote_deletions2 == [(CLIENT_ID, cid)]
+    assert store.find(MODEL, turn2) is None

@@ -19,6 +19,8 @@ from .server.middleware import (
     cleanup_expired_media,
 )
 from .services import GeminiClientPool, LMDBConversationStore
+from .utils import g_config
+from .utils.config import ChatMode
 
 # Canonical audio MIME types: Python's platform mapping yields legacy "x-"
 # types (audio/x-wav, audio/x-aac, audio/x-flac) that Google's upload
@@ -36,30 +38,51 @@ for _ext, _mime in (
 RETENTION_CLEANUP_INTERVAL_SECONDS = 6 * 60 * 60  # Check every 6 hours
 
 
+def _get_cleanup_interval() -> int:
+    """Determine the retention cleanup check interval."""
+    interval = RETENTION_CLEANUP_INTERVAL_SECONDS
+    if g_config.gemini.chat_mode == ChatMode.AUTO_DELETE:
+        interval = min(interval, max(60, g_config.gemini.auto_delete_ttl // 2))
+    return interval
+
+
 async def _run_retention_cleanup(stop_event: asyncio.Event) -> None:
     """
-    Periodically enforce LMDB retention policy until the stop_event is set.
+    Periodically enforce LMDB retention policy and remote chat deletion until the stop_event is set.
     """
     store = LMDBConversationStore()
-    if store.retention_days <= 0:
+    pool = GeminiClientPool()
+
+    if store.retention_days <= 0 and g_config.gemini.chat_mode != ChatMode.AUTO_DELETE:
         logger.info("LMDB retention cleanup disabled; skipping scheduler.")
         return
 
+    interval = _get_cleanup_interval()
     logger.info(
-        f"Starting LMDB retention cleanup task (retention={store.retention_days} day(s), interval={RETENTION_CLEANUP_INTERVAL_SECONDS} seconds)."
+        f"Starting LMDB retention cleanup task (retention={store.retention_days} day(s), "
+        f"auto_delete_ttl={g_config.gemini.auto_delete_ttl}s, interval={interval}s)."
     )
 
     while not stop_event.is_set():
         try:
-            store.cleanup_expired()
+            _, to_delete = store.cleanup_expired()
+            if to_delete:
+                for client_id, cid in to_delete:
+                    try:
+                        await pool.delete_chat(client_id, cid)
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to delete remote chat {cid} for client {client_id}: {e}"
+                        )
             cleanup_expired_media(store.retention_days)
         except Exception:
             logger.exception("LMDB retention cleanup task failed.")
 
         try:
+            current_interval = _get_cleanup_interval()
             await asyncio.wait_for(
                 stop_event.wait(),
-                timeout=RETENTION_CLEANUP_INTERVAL_SECONDS,
+                timeout=current_interval,
             )
         except TimeoutError:
             continue

@@ -16,6 +16,7 @@ from app.models import (
     ConversationInStore,
 )
 from app.utils import g_config
+from app.utils.config import ChatMode
 from app.utils.helper import (
     normalize_llm_text,
     remove_tool_call_blocks,
@@ -24,6 +25,11 @@ from app.utils.helper import (
 from app.utils.singleton import Singleton
 
 _VOLATILE_TRANS_TABLE = str.maketrans("", "", string.whitespace + string.punctuation)
+
+
+def _cid_of(metadata: list[str | None] | None) -> str | None:
+    """Chat id from a metadata list, which stores it at index 0."""
+    return metadata[0] if metadata else None
 
 
 def _fuzzy_normalize(text: str | None) -> str | None:
@@ -285,6 +291,7 @@ class LMDBConversationStore(metaclass=Singleton):
         messages: list[AppMessage],
         metadata: list[str | None],
         chat_scope: str | None = None,
+        chat_mode: str | None = None,
     ) -> None:
         """
         Store a conversation model in LMDB.
@@ -296,6 +303,7 @@ class LMDBConversationStore(metaclass=Singleton):
             metadata: Session metadata
             chat_scope: Identity of the ephemeral window owning the chat, None if it is a normal
                 chat kept in the account's history
+            chat_mode: Chat mode under which the conversation was created ('normal', 'temporary', 'auto_delete')
         """
         if not messages:
             raise ValueError("Messages list cannot be empty")
@@ -307,6 +315,7 @@ class LMDBConversationStore(metaclass=Singleton):
             metadata=metadata,
             messages=messages,
             chat_scope=chat_scope,
+            chat_mode=chat_mode,
             created_at=now,
             updated_at=now,
         )
@@ -562,21 +571,51 @@ class LMDBConversationStore(metaclass=Singleton):
             logger.error(f"Failed to list keys: {e}")
         return keys
 
-    def cleanup_expired(self, retention_days: int | None = None) -> int:
-        """Delete conversations older than the given retention period."""
+    def cleanup_expired(
+        self,
+        retention_days: int | None = None,
+        auto_delete_ttl: int | None = None,
+    ) -> tuple[int, list[tuple[str, str]]]:
+        """Delete conversations older than the given retention period or auto_delete TTL.
+
+        Returns:
+            tuple of (removed_count, list of (client_id, cid) scheduled for remote Google deletion)
+        """
         retention_value = (
             self.retention_days if retention_days is None else max(0, int(retention_days))
         )
-        if retention_value <= 0:
-            logger.debug("Retention cleanup skipped because retention is disabled.")
-            return 0
+        ttl_value = (
+            g_config.gemini.auto_delete_ttl
+            if auto_delete_ttl is None
+            else max(0, int(auto_delete_ttl))
+        )
 
-        cutoff = datetime.now() - timedelta(days=retention_value)
-        return self.cleanup_before(cutoff)
+        has_auto_delete = g_config.gemini.chat_mode == ChatMode.AUTO_DELETE and ttl_value > 0
+        if retention_value <= 0 and not has_auto_delete:
+            logger.debug("Retention cleanup skipped because retention is disabled.")
+            return 0, []
+
+        now = datetime.now()
+        normal_cutoff = now - timedelta(days=retention_value) if retention_value > 0 else None
+        auto_delete_cutoff = now - timedelta(seconds=ttl_value) if ttl_value > 0 else None
+
+        return self.cleanup_with_remote(
+            normal_cutoff=normal_cutoff, auto_delete_cutoff=auto_delete_cutoff
+        )
 
     def cleanup_before(self, cutoff: datetime) -> int:
         """Delete conversations older than an explicit timestamp and repair both indexes."""
-        expired_entries: list[tuple[str, ConversationInStore]] = []
+        removed, _ = self.cleanup_with_remote(normal_cutoff=cutoff, auto_delete_cutoff=cutoff)
+        return removed
+
+    def cleanup_with_remote(
+        self,
+        normal_cutoff: datetime | None = None,
+        auto_delete_cutoff: datetime | None = None,
+    ) -> tuple[int, list[tuple[str, str]]]:
+        """Delete expired conversations and return list of (client_id, cid) for remote deletion."""
+        expired_entries: list[tuple[str, ConversationInStore, bool]] = []
+        active_cids: set[str] = set()
 
         try:
             with self._get_transaction(write=False) as txn:
@@ -599,19 +638,37 @@ class LMDBConversationStore(metaclass=Singleton):
                     if not timestamp:
                         continue
 
-                    if timestamp < cutoff:
-                        expired_entries.append((key_str, conv))
+                    is_auto_delete = conv.chat_mode == ChatMode.AUTO_DELETE or (
+                        conv.chat_mode is None and g_config.gemini.chat_mode == ChatMode.AUTO_DELETE
+                    )
+                    cutoff = auto_delete_cutoff if is_auto_delete else normal_cutoff
+
+                    cid = _cid_of(conv.metadata)
+                    if cutoff is not None and timestamp < cutoff:
+                        expired_entries.append((key_str, conv, is_auto_delete))
+                    else:
+                        if cid:
+                            active_cids.add(cid)
         except Error as exc:
             logger.error(f"Failed to scan LMDB for retention cleanup: {exc}")
             raise
 
         if not expired_entries:
-            return 0
+            return 0, []
+
+        remote_deletions: list[tuple[str, str]] = []
+        seen_remote_cids: set[str] = set()
+        for _, conv, is_auto_delete in expired_entries:
+            if is_auto_delete:
+                cid = _cid_of(conv.metadata)
+                if cid and cid not in active_cids and cid not in seen_remote_cids:
+                    seen_remote_cids.add(cid)
+                    remote_deletions.append((conv.client_id, cid))
 
         removed = 0
         try:
             with self._get_transaction(write=True) as txn:
-                for key_str, conv in expired_entries:
+                for key_str, conv, _ in expired_entries:
                     key_bytes = key_str.encode("utf-8")
                     if not txn.delete(key_bytes):
                         continue
@@ -631,10 +688,11 @@ class LMDBConversationStore(metaclass=Singleton):
 
         if removed:
             logger.info(
-                f"LMDB retention cleanup removed {removed} conversation(s) older than {cutoff.isoformat()}."
+                f"LMDB retention cleanup removed {removed} conversation(s) "
+                f"({len(remote_deletions)} scheduled for Google deletion)."
             )
 
-        return removed
+        return removed, remote_deletions
 
     def clear(self) -> int:
         """Delete every conversation and index entry from the store."""
