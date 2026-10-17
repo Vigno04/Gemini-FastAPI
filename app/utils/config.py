@@ -148,8 +148,11 @@ class GeminiConfig(BaseModel):
         default=86400,
         ge=60,
         description=(
-            "Inactivity TTL in seconds before an auto_delete conversation is removed from Google "
-            "and LMDB (default: 86400s / 24h)"
+            "Inactivity TTL in seconds applicable ONLY to conversations created with "
+            "chat_mode='auto_delete'. When expired, the conversation is deleted from "
+            "both Google account history and local LMDB. Does not affect 'normal' conversations "
+            "(which are retained locally according to storage.retention_days and never deleted from Google; "
+            "default: 86400s / 24h)"
         ),
     )
     guest_mode: GuestMode = Field(
@@ -207,7 +210,11 @@ class StorageConfig(BaseModel):
     retention_days: int = Field(
         default=14,
         ge=0,
-        description="Number of days to retain conversations before automatic cleanup (0 disables cleanup)",
+        description=(
+            "Number of days to retain standard conversations in local LMDB before cleanup "
+            "(0 disables cleanup). Only purges local database and media storage; does not delete "
+            "conversations from Google accounts (for remote Google deletion, see gemini.auto_delete_ttl)"
+        ),
     )
 
 

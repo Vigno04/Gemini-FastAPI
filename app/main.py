@@ -53,7 +53,12 @@ async def _run_retention_cleanup(stop_event: asyncio.Event) -> None:
     store = LMDBConversationStore()
     pool = GeminiClientPool()
 
-    if store.retention_days <= 0 and g_config.gemini.chat_mode != ChatMode.AUTO_DELETE:
+    if (
+        store.retention_days <= 0
+        and g_config.gemini.chat_mode != ChatMode.AUTO_DELETE
+        and not store.get_pending_deletions()
+        and not store.has_auto_delete_records()
+    ):
         logger.info("LMDB retention cleanup disabled; skipping scheduler.")
         return
 
@@ -68,13 +73,25 @@ async def _run_retention_cleanup(stop_event: asyncio.Event) -> None:
             _, to_delete = store.cleanup_expired()
             if to_delete:
                 for client_id, cid in to_delete:
+                    if stop_event.is_set():
+                        break
                     try:
-                        await pool.delete_chat(client_id, cid)
+                        success = await pool.delete_chat(client_id, cid)
+                        if success:
+                            store.remove_pending_deletion(cid)
+                        else:
+                            store.record_pending_deletion_failure(cid)
                     except Exception as e:
                         logger.warning(
                             f"Failed to delete remote chat {cid} for client {client_id}: {e}"
                         )
-            cleanup_expired_media(store.retention_days)
+                        store.record_pending_deletion_failure(cid)
+                    await asyncio.sleep(0.1)
+
+            if g_config.gemini.chat_mode == ChatMode.AUTO_DELETE:
+                cleanup_expired_media(ttl_seconds=g_config.gemini.auto_delete_ttl)
+            else:
+                cleanup_expired_media(retention_days=store.retention_days)
         except Exception:
             logger.exception("LMDB retention cleanup task failed.")
 
@@ -127,19 +144,14 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         cleanup_stop_event.set()
+        cleanup_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cleanup_task
+
         try:
             await pool.close()
         except Exception:
             logger.exception("Failed to close Gemini client pool gracefully.")
-
-        try:
-            await cleanup_task
-        except asyncio.CancelledError:
-            logger.debug("Background tasks cancelled during shutdown.")
-        except Exception:
-            logger.exception(
-                "One or more background tasks terminated with an unexpected error during shutdown."
-            )
 
 
 def create_app() -> FastAPI:

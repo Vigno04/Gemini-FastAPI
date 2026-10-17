@@ -44,7 +44,11 @@ gemini:
   # WARNING: Google may close a temporary window at any time mid-conversation. The reply can then come back without the earlier
   # context instead of erroring, so the loss may be silent. Prefer "normal" or "auto_delete" for long or context-sensitive conversations.
   chat_mode: "normal"
-  auto_delete_ttl: 86400 # Inactivity TTL in seconds before auto_delete conversations are deleted from Google and LMDB (default: 86400s / 24h)
+  # Inactivity TTL in seconds applicable ONLY to conversations created with chat_mode: "auto_delete".
+  # After this period of inactivity, conversations are deleted from BOTH Google account history and local LMDB.
+  # Note: Standard ("normal") conversations do NOT use this; they are retained locally according to storage.retention_days
+  # and are never deleted from Google.
+  auto_delete_ttl: 86400 # (default: 86400s / 24h)
   # Guest client health policy: "strict" fails if any client is unhealthy; "adaptive" fails only if all are unhealthy; "permissive" only logs a warning.
   guest_mode: "adaptive"
 
@@ -52,7 +56,10 @@ storage:
   path: "data/lmdb" # Database storage path
   media_path: "data/media" # Media storage path
   max_size: 268435456 # Maximum database size (256 MB)
-  retention_days: 14 # Number of days to retain conversations before cleanup
+  # Number of days to retain standard conversations in local LMDB before cleanup (0 disables cleanup).
+  # Purges local database and media storage only; does not delete conversations from Google accounts.
+  # (For remote Google conversation cleanup, see gemini.chat_mode: "auto_delete" and gemini.auto_delete_ttl).
+  retention_days: 14
 
 logging:
   level: "DEBUG" # Log level: DEBUG, INFO, WARNING, ERROR

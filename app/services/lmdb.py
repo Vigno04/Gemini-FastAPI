@@ -32,6 +32,26 @@ def _cid_of(metadata: list[str | None] | None) -> str | None:
     return metadata[0] if metadata else None
 
 
+def _parse_timestamp(ts: Any) -> datetime | None:
+    """Parse raw timestamp value into a datetime object."""
+    if isinstance(ts, datetime):
+        return ts
+    if isinstance(ts, str):
+        with suppress(ValueError):
+            return datetime.fromisoformat(ts)
+    return None
+
+
+def _parse_pending_val(val_bytes: bytes) -> tuple[str, int]:
+    """Parse pending deletion value into (client_id, attempts)."""
+    val_str = val_bytes.decode("utf-8")
+    if val_str.startswith("{"):
+        with suppress(Exception):
+            data = orjson.loads(val_bytes)
+            return data.get("client_id", ""), data.get("attempts", 0)
+    return val_str, 0
+
+
 def _fuzzy_normalize(text: str | None) -> str | None:
     """
     Lowercase and remove all whitespace and punctuation.
@@ -144,8 +164,9 @@ class LMDBConversationStore(metaclass=Singleton):
     INDEX_VERSION = "v2"
     HASH_LOOKUP_PREFIX = f"hash:{INDEX_VERSION}:"
     FUZZY_LOOKUP_PREFIX = f"fuzzy:{INDEX_VERSION}:"
+    PENDING_DELETE_PREFIX = "pending_del:"
     _INDEX_NAMESPACES = ("hash:", "fuzzy:")
-    _INTERNAL_NAMESPACES = ("hash:", "fuzzy:", "meta:")
+    _INTERNAL_NAMESPACES = ("hash:", "fuzzy:", "meta:", "pending_del:")
     _INDEX_VERSION_KEY = "meta:index_version"
 
     @classmethod
@@ -571,12 +592,101 @@ class LMDBConversationStore(metaclass=Singleton):
             logger.error(f"Failed to list keys: {e}")
         return keys
 
+    def get_pending_deletions(self, txn: Transaction | None = None) -> list[tuple[str, str]]:
+        """Retrieve all conversations pending remote deletion as (client_id, cid) pairs."""
+        deletions: list[tuple[str, str]] = []
+        prefix_bytes = self.PENDING_DELETE_PREFIX.encode()
+
+        def _scan(cursor: lmdb.Cursor) -> None:
+            if not cursor.set_range(prefix_bytes):
+                return
+            for key_bytes, val_bytes in cursor:
+                k_bytes = bytes(key_bytes)
+                if not k_bytes.startswith(prefix_bytes):
+                    break
+                cid = k_bytes[len(prefix_bytes) :].decode("utf-8")
+                client_id, _ = _parse_pending_val(bytes(val_bytes))
+                deletions.append((client_id, cid))
+
+        if txn is not None:
+            _scan(txn.cursor())
+        else:
+            try:
+                with self._get_transaction(write=False) as read_txn:
+                    _scan(read_txn.cursor())
+            except Error as e:
+                logger.error(f"Failed to scan pending remote deletions: {e}")
+        return deletions
+
+    def remove_pending_deletion(self, cid: str) -> bool:
+        """Acknowledge a completed remote deletion and remove its pending marker."""
+        key = f"{self.PENDING_DELETE_PREFIX}{cid}".encode()
+        try:
+            with self._get_transaction(write=True) as txn:
+                return txn.delete(key)
+        except Error as e:
+            logger.error(f"Failed to remove pending deletion marker for {cid}: {e}")
+            return False
+
+    def record_pending_deletion_failure(self, cid: str, max_retries: int = 5) -> bool:
+        """Increment attempt count for a pending deletion, evicting if max_retries exceeded.
+
+        Returns:
+            True if the item was evicted due to exceeding max_retries, False otherwise.
+        """
+        key = f"{self.PENDING_DELETE_PREFIX}{cid}".encode()
+        try:
+            with self._get_transaction(write=True) as txn:
+                val = txn.get(key)
+                if not val:
+                    return False
+                client_id, attempts = _parse_pending_val(bytes(val))
+                attempts += 1
+                if attempts >= max_retries:
+                    txn.delete(key)
+                    logger.error(
+                        f"Remote deletion for chat {cid} (client {client_id}) exceeded "
+                        f"{max_retries} attempts; dropped from pending queue."
+                    )
+                    return True
+                data = {"client_id": client_id, "attempts": attempts}
+                txn.put(key, orjson.dumps(data))
+                return False
+        except Error as e:
+            logger.error(f"Failed to update pending deletion for {cid}: {e}")
+            return False
+
+    def has_auto_delete_records(self) -> bool:
+        """Check whether the store contains any conversations marked for auto-deletion."""
+        try:
+            with self._get_transaction(write=False) as txn:
+                cursor = txn.cursor()
+                for key_bytes, value_bytes in cursor:
+                    key_str = bytes(key_bytes).decode("utf-8")
+                    if self._is_internal_key(key_str):
+                        continue
+                    try:
+                        storage_data = orjson.loads(value_bytes)
+                        if storage_data.get("chat_mode") == ChatMode.AUTO_DELETE:
+                            return True
+                    except Exception:
+                        continue
+        except Error as e:
+            logger.error(f"Failed to check for auto_delete records: {e}")
+        return False
+
     def cleanup_expired(
         self,
         retention_days: int | None = None,
         auto_delete_ttl: int | None = None,
     ) -> tuple[int, list[tuple[str, str]]]:
         """Delete conversations older than the given retention period or auto_delete TTL.
+
+        Args:
+            retention_days: Number of days to retain standard conversations in local LMDB (0 disables).
+                Only purges local storage; does not schedule remote Google deletion.
+            auto_delete_ttl: Inactivity TTL in seconds for conversations created with
+                chat_mode='auto_delete'. Purges from LMDB and schedules remote Google deletion.
 
         Returns:
             tuple of (removed_count, list of (client_id, cid) scheduled for remote Google deletion)
@@ -590,8 +700,11 @@ class LMDBConversationStore(metaclass=Singleton):
             else max(0, int(auto_delete_ttl))
         )
 
-        has_auto_delete = g_config.gemini.chat_mode == ChatMode.AUTO_DELETE and ttl_value > 0
-        if retention_value <= 0 and not has_auto_delete:
+        has_auto_delete = (
+            g_config.gemini.chat_mode == ChatMode.AUTO_DELETE or self.has_auto_delete_records()
+        ) and ttl_value > 0
+        has_pending = bool(self.get_pending_deletions())
+        if retention_value <= 0 and not has_auto_delete and not has_pending:
             logger.debug("Retention cleanup skipped because retention is disabled.")
             return 0, []
 
@@ -627,43 +740,41 @@ class LMDBConversationStore(metaclass=Singleton):
 
                     try:
                         storage_data = orjson.loads(value_bytes)
-                        conv = ConversationInStore.model_validate(storage_data)
+                        ts_raw = storage_data.get("updated_at") or storage_data.get("created_at")
+                        timestamp = _parse_timestamp(ts_raw)
+                        if not timestamp:
+                            continue
+
+                        is_auto_delete = storage_data.get("chat_mode") == ChatMode.AUTO_DELETE
+                        cutoff = auto_delete_cutoff if is_auto_delete else normal_cutoff
+
+                        raw_meta = storage_data.get("metadata")
+                        cid = raw_meta[0] if raw_meta and isinstance(raw_meta, list) else None
+
+                        if cutoff is not None and timestamp < cutoff:
+                            conv = ConversationInStore.model_validate(storage_data)
+                            expired_entries.append((key_str, conv, is_auto_delete))
+                        else:
+                            if cid:
+                                active_cids.add(cid)
                     except (orjson.JSONDecodeError, Exception) as exc:
                         logger.warning(f"Failed to decode record for key {key_str}: {exc}")
                         continue
-
-                    # Last touched, not first created: a conversation still in active use has
-                    # not expired no matter how long ago it started.
-                    timestamp = conv.updated_at or conv.created_at
-                    if not timestamp:
-                        continue
-
-                    is_auto_delete = conv.chat_mode == ChatMode.AUTO_DELETE or (
-                        conv.chat_mode is None and g_config.gemini.chat_mode == ChatMode.AUTO_DELETE
-                    )
-                    cutoff = auto_delete_cutoff if is_auto_delete else normal_cutoff
-
-                    cid = _cid_of(conv.metadata)
-                    if cutoff is not None and timestamp < cutoff:
-                        expired_entries.append((key_str, conv, is_auto_delete))
-                    else:
-                        if cid:
-                            active_cids.add(cid)
         except Error as exc:
             logger.error(f"Failed to scan LMDB for retention cleanup: {exc}")
             raise
 
         if not expired_entries:
-            return 0, []
+            return 0, self.get_pending_deletions()
 
-        remote_deletions: list[tuple[str, str]] = []
+        remote_to_stage: list[tuple[str, str]] = []
         seen_remote_cids: set[str] = set()
         for _, conv, is_auto_delete in expired_entries:
-            if is_auto_delete:
+            if is_auto_delete and conv.chat_scope is None:
                 cid = _cid_of(conv.metadata)
                 if cid and cid not in active_cids and cid not in seen_remote_cids:
                     seen_remote_cids.add(cid)
-                    remote_deletions.append((conv.client_id, cid))
+                    remote_to_stage.append((conv.client_id, cid))
 
         removed = 0
         try:
@@ -682,11 +793,18 @@ class LMDBConversationStore(metaclass=Singleton):
                         )
                         self._remove_from_index(txn, self.FUZZY_LOOKUP_PREFIX, fuzzy_hash, key_str)
                     removed += 1
+
+                for client_id, cid in remote_to_stage:
+                    txn.put(
+                        f"{self.PENDING_DELETE_PREFIX}{cid}".encode(),
+                        client_id.encode(),
+                    )
         except Error as exc:
             logger.error(f"Failed to delete expired conversations: {exc}")
             raise
 
-        if removed:
+        remote_deletions = self.get_pending_deletions()
+        if removed or remote_deletions:
             logger.info(
                 f"LMDB retention cleanup removed {removed} conversation(s) "
                 f"({len(remote_deletions)} scheduled for Google deletion)."

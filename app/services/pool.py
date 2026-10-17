@@ -151,9 +151,15 @@ class GeminiClientPool(metaclass=Singleton):
         """Delete a remote chat from Google for a given client."""
         client = self._id_map.get(client_id)
         if not client:
-            logger.warning(f"Cannot delete chat {cid}: client {client_id} not found in pool")
-            return False
+            logger.warning(
+                f"Cannot delete chat {cid}: client {client_id} not found in pool. "
+                "Dropping pending deletion."
+            )
+            return True
         if client.is_guest():
+            logger.warning(
+                f"Cannot delete remote chat {cid}: client {client_id} is currently unauthenticated (guest session)"
+            )
             return False
         try:
             if not client.running():
