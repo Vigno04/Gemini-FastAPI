@@ -370,6 +370,7 @@ def _persist_conversation(
             messages=full_history,
             metadata=metadata,
             chat_scope=chat_scope,
+            chat_mode=g_config.gemini.chat_mode,
         )
         logger.debug("Conversation saved to LMDB.")
         return "success"
