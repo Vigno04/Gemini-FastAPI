@@ -16,6 +16,7 @@ from app.server.middleware import (
     verify_api_key,
 )
 from app.services import GeminiClientPool
+from app.utils.helper import IMAGE_GENERATION_FORCED_PROMPT, IMAGE_GENERATION_PROMPT
 
 router = APIRouter()
 
@@ -42,7 +43,13 @@ class CreateImageRequest(BaseModel):
     """Request payload for image generation."""
 
     prompt: str = Field(..., max_length=32000, description="Prompt text for image generation")
-    model: str | None = Field(default="gemini-flash", description="Model identifier")
+    model: str | None = Field(
+        default=None,
+        description=(
+            "Model identifier. Omit it to use each Gemini account's own default model, "
+            "which is always available on that account's tier."
+        ),
+    )
     n: int | None = Field(default=1, ge=1, le=10, description="Number of images to generate")
     size: str | None = Field(
         default="1:1",
@@ -124,18 +131,18 @@ async def create_image(
 ):
     """Handle OpenAI-compatible Image Generation API requests."""
     pool = GeminiClientPool()
-    target_model = request.model or "gemini-flash"
-    try:
-        resolved_model = _resolve_model_name(pool, target_model)
-    except ValueError as exc:
-        if request.model:
+    # Only resolve a model the client explicitly asked for; an unresolvable name is a client
+    # error, never a reason to silently switch models. When no model is given, leave it
+    # unspecified and let each account answer with its own default, which its tier can serve.
+    resolved_model: str | None = None
+    if request.model:
+        try:
+            resolved_model = _resolve_model_name(pool, request.model)
+        except ValueError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=str(exc),
             ) from exc
-        resolved_model = "gemini-3.8-flash"
-    except Exception:
-        resolved_model = "gemini-3.8-flash"
 
     try:
         wrapper = await pool.acquire(require_account=True)
@@ -149,22 +156,11 @@ async def create_image(
     prompt_clean = request.prompt.strip()
     prompt_lower = prompt_clean.lower()
 
-    # Base generation command (keep user prompt natural without injecting rigid wrappers)
-    trigger_words = (
-        "generate",
-        "create",
-        "draw",
-        "make an image",
-        "picture of",
-        "photo of",
-        "disegna",
-        "crea",
-        "genera",
-    )
-    if any(prompt_lower.startswith(w) for w in trigger_words):
-        generation_prompt = prompt_clean
-    else:
-        generation_prompt = f"Generate an image of {prompt_clean}"
+    # This endpoint always generates an image (OpenAI semantics: the prompt is the image
+    # description), so the user prompt passes through untouched, in any language. Emitting an
+    # image is enforced with the same system instruction chat.py uses for the `image_generation`
+    # tool instead of language-dependent trigger-word heuristics.
+    generation_prompt = prompt_clean
 
     # Aspect Ratio handling: append clean aspect ratio directive if requested
     ar = _resolve_aspect_ratio(request.size)
@@ -181,8 +177,10 @@ async def create_image(
     elif request.style == "natural" and "natural" not in prompt_lower:
         generation_prompt = f"{generation_prompt}, natural style"
 
+    image_instruction = f"{IMAGE_GENERATION_PROMPT}\n\n{IMAGE_GENERATION_FORCED_PROMPT}"
+
     try:
-        resp = await session.send_message(generation_prompt)
+        resp = await session.send_message(f"{image_instruction}\n\n{generation_prompt}")
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
